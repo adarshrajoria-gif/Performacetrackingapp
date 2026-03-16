@@ -3,10 +3,11 @@ import {
   BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
 } from 'recharts';
-import { TrendingUp, Activity, Users, Target, ArrowUpRight, ChevronDown } from 'lucide-react';
+import { Activity, Target, ArrowUpRight, TrendingUp } from 'lucide-react';
 import {
-  computeMetrics, groupByDate, groupByField, responseRateTrend,
-  formatDateShort, formatDate, CHART_COLORS, statusColor,
+  computeMetrics, groupByDate, groupByField, conversionTrend,
+  buildFunnelData, collectStages, getStageCount,
+  formatDateShort, formatDate, CHART_COLORS, statusColor, pct,
 } from '../utils/helpers';
 
 const CustomTooltip = ({ active, payload, label }) => {
@@ -21,14 +22,14 @@ const CustomTooltip = ({ active, payload, label }) => {
   );
 };
 
-function MetricCard({ label, value, sub, icon: Icon, accent = 'text-cyan-400' }) {
+function MetricCard({ label, value, sub, icon: Icon, color = '#06b6d4' }) {
   return (
     <div className="metric-card">
       <div className="flex items-center justify-between mb-2">
         <span className="metric-label">{label}</span>
-        {Icon && <Icon size={14} className={accent} />}
+        {Icon && <Icon size={14} style={{ color }} />}
       </div>
-      <div className={`metric-value ${accent}`}>{value}</div>
+      <div className="metric-value" style={{ color }}>{value}</div>
       {sub && <div className="metric-sub mt-1">{sub}</div>}
     </div>
   );
@@ -40,32 +41,30 @@ function SortIcon({ field, sortField, sortDir }) {
 }
 
 export default function Dashboard({ initiatives, activities }) {
-  const [selectedId, setSelectedId] = useState('all');
+  const [selectedId, setSelectedId] = useState(initiatives[0]?.id || 'all');
   const [sortField, setSortField] = useState('date');
   const [sortDir, setSortDir] = useState('desc');
 
   const filtered = useMemo(() => {
-    if (selectedId === 'all') return activities;
-    return activities.filter((a) => a.initiativeId === selectedId);
+    const raw = selectedId === 'all' ? activities : activities.filter((a) => a.initiativeId === selectedId);
+    return raw;
   }, [activities, selectedId]);
 
-  const metrics = useMemo(() => computeMetrics(filtered), [filtered]);
-  const timeData = useMemo(() => groupByDate(filtered).map((d) => ({
-    ...d,
-    date: formatDateShort(d.date),
-  })), [filtered]);
-  const platformData = useMemo(() => groupByField(filtered, 'platform'), [filtered]);
-  const typeData = useMemo(() => groupByField(filtered, 'activityType'), [filtered]);
-  const trendData = useMemo(() => responseRateTrend(filtered).map((d) => ({
-    ...d,
-    date: formatDateShort(d.date),
-  })), [filtered]);
+  const stages = useMemo(() => collectStages(initiatives, selectedId), [initiatives, selectedId]);
 
-  const funnelData = [
-    { name: 'Outreach', value: metrics.outreach, fill: '#06b6d4' },
-    { name: 'Responses', value: metrics.responses, fill: '#818cf8' },
-    { name: 'Conversions', value: metrics.conversions, fill: '#34d399' },
-  ];
+  const metrics = useMemo(() => computeMetrics(filtered, stages), [filtered, stages]);
+  const timeData = useMemo(() => groupByDate(filtered, stages).map((d) => ({
+    ...d,
+    date: formatDateShort(d.date),
+  })), [filtered, stages]);
+  const platformData = useMemo(() => groupByField(filtered, 'platform', stages), [filtered, stages]);
+  const typeData = useMemo(() => groupByField(filtered, 'activityType', stages), [filtered, stages]);
+  const trendData = useMemo(() => conversionTrend(filtered, stages).map((d) => ({
+    ...d,
+    date: formatDateShort(d.date),
+  })), [filtered, stages]);
+
+  const funnelData = useMemo(() => buildFunnelData(metrics.stageTotals, stages), [metrics, stages]);
 
   const handleSort = (field) => {
     if (sortField === field) setSortDir(sortDir === 'asc' ? 'desc' : 'asc');
@@ -74,17 +73,57 @@ export default function Dashboard({ initiatives, activities }) {
 
   const recentActivities = useMemo(() => {
     return [...filtered].sort((a, b) => {
-      let av = a[sortField], bv = b[sortField];
+      let av, bv;
+      if (stages.includes(sortField)) {
+        av = getStageCount(a, sortField);
+        bv = getStageCount(b, sortField);
+      } else {
+        av = a[sortField];
+        bv = b[sortField];
+      }
+
       if (typeof av === 'string') av = av.toLowerCase();
       if (typeof bv === 'string') bv = bv.toLowerCase();
       if (av < bv) return sortDir === 'asc' ? -1 : 1;
       if (av > bv) return sortDir === 'asc' ? 1 : -1;
       return 0;
     }).slice(0, 10);
-  }, [filtered, sortField, sortDir]);
+  }, [filtered, sortField, sortDir, stages]);
 
-  const initiativeMap = useMemo(() =>
-    Object.fromEntries(initiatives.map((i) => [i.id, i])), [initiatives]);
+  const initiativeMap = useMemo(() => {
+    const map = {};
+    for (let i = 0; i < initiatives.length; i++) {
+      map[initiatives[i].id] = initiatives[i];
+    }
+    return map;
+  }, [initiatives]);
+
+  // For metric cards, show all stages + conversion rate
+  const firstStage = stages[0] || 'Outreach';
+  const lastStage = stages[stages.length - 1] || 'Conversions';
+  const firstTotal = metrics.stageTotals[firstStage] || 0;
+  const lastTotal = metrics.stageTotals[lastStage] || 0;
+  const convRate = pct(lastTotal, firstTotal);
+
+  if (initiatives.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 text-center">
+        <div className="w-16 h-16 bg-gray-900 rounded-full flex items-center justify-center mb-6">
+          <Activity className="text-cyan-400" size={32} />
+        </div>
+        <h1 className="text-2xl font-bold text-gray-100">Welcome to Performance Tracker</h1>
+        <p className="text-gray-500 mt-2 max-w-md">
+          To get started, you'll need to create your first initiative and define your funnel stages.
+        </p>
+        <button
+          onClick={() => window.location.href = '/initiatives'}
+          className="mt-8 px-6 py-2.5 bg-cyan-500 hover:bg-cyan-400 text-gray-950 font-bold rounded-lg transition-all shadow-lg shadow-cyan-500/20"
+        >
+          Create First Initiative
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -95,14 +134,7 @@ export default function Dashboard({ initiatives, activities }) {
           <p className="text-sm text-gray-500 mt-0.5">Outreach & GTM performance overview</p>
         </div>
 
-        {/* Initiative tabs */}
         <div className="flex flex-wrap gap-2">
-          <button
-            onClick={() => setSelectedId('all')}
-            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${selectedId === 'all' ? 'tab-active' : 'tab-inactive'}`}
-          >
-            All Initiatives
-          </button>
           {initiatives.map((i) => (
             <button
               key={i.id}
@@ -115,26 +147,30 @@ export default function Dashboard({ initiatives, activities }) {
         </div>
       </div>
 
-      {/* Metric Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-        <MetricCard label="Activities" value={metrics.total} icon={Activity} accent="text-cyan-400" />
-        <MetricCard label="Outreach" value={metrics.outreach.toLocaleString()} icon={Users} accent="text-indigo-400" sub="total people reached" />
-        <MetricCard label="Responses" value={metrics.responses.toLocaleString()} icon={ArrowUpRight} accent="text-violet-400" />
-        <MetricCard label="Conversions" value={metrics.conversions.toLocaleString()} icon={Target} accent="text-emerald-400" />
-        <MetricCard
-          label="Response Rate"
-          value={`${metrics.responseRate}%`}
-          icon={TrendingUp}
-          accent={metrics.responseRate > 15 ? 'text-emerald-400' : metrics.responseRate > 8 ? 'text-amber-400' : 'text-red-400'}
-          sub={`${metrics.responses}/${metrics.outreach}`}
-        />
-        <MetricCard
-          label="Conv. Rate"
-          value={`${metrics.conversionRate}%`}
-          icon={Target}
-          accent={metrics.conversionRate > 5 ? 'text-emerald-400' : metrics.conversionRate > 2 ? 'text-amber-400' : 'text-red-400'}
-          sub={`${metrics.conversions}/${metrics.outreach}`}
-        />
+      {/* Metric Cards — dynamic based on stages */}
+      <div className="flex flex-wrap gap-3">
+        <div className="min-w-[140px] flex-1">
+          <MetricCard label="Activities" value={metrics.total} icon={Activity} color="#06b6d4" />
+        </div>
+        {stages.map((stage, idx) => (
+          <div key={stage} className="min-w-[140px] flex-1">
+            <MetricCard
+              label={stage}
+              value={(metrics.stageTotals[stage] || 0).toLocaleString()}
+              icon={idx === 0 ? ArrowUpRight : idx === stages.length - 1 ? Target : TrendingUp}
+              color={CHART_COLORS[idx % CHART_COLORS.length]}
+            />
+          </div>
+        ))}
+        <div className="min-w-[140px] flex-1">
+          <MetricCard
+            label={`${lastStage} Rate`}
+            value={`${convRate}%`}
+            icon={Target}
+            color={convRate > 10 ? '#34d399' : convRate > 5 ? '#fbbf24' : '#f87171'}
+            sub={`${lastTotal}/${firstTotal}`}
+          />
+        </div>
       </div>
 
       {/* Charts Row 1 */}
@@ -152,9 +188,9 @@ export default function Dashboard({ initiatives, activities }) {
                 <YAxis tick={{ fill: '#6b7280', fontSize: 11 }} axisLine={false} tickLine={false} width={30} />
                 <Tooltip content={<CustomTooltip />} />
                 <Legend wrapperStyle={{ fontSize: 11, color: '#9ca3af' }} />
-                <Bar dataKey="quantity" name="Outreach" fill="#06b6d4" radius={[3,3,0,0]} />
-                <Bar dataKey="responseCount" name="Responses" fill="#818cf8" radius={[3,3,0,0]} />
-                <Bar dataKey="conversionCount" name="Conversions" fill="#34d399" radius={[3,3,0,0]} />
+                {stages.map((stage, idx) => (
+                  <Bar key={stage} dataKey={stage} name={stage} fill={CHART_COLORS[idx % CHART_COLORS.length]} radius={[3, 3, 0, 0]} />
+                ))}
               </BarChart>
             </ResponsiveContainer>
           )}
@@ -163,7 +199,7 @@ export default function Dashboard({ initiatives, activities }) {
         {/* Funnel */}
         <div className="card p-4">
           <h3 className="text-sm font-semibold text-gray-300 mb-4">Conversion Funnel</h3>
-          <div className="space-y-3 mt-6">
+          <div className="space-y-3 mt-2">
             {funnelData.map((f, i) => {
               const maxVal = funnelData[0].value || 1;
               const width = Math.max(5, Math.round((f.value / maxVal) * 100));
@@ -178,9 +214,9 @@ export default function Dashboard({ initiatives, activities }) {
                       className="h-full rounded-md flex items-center pl-2 transition-all"
                       style={{ width: `${width}%`, backgroundColor: f.fill + '33', borderLeft: `3px solid ${f.fill}` }}
                     >
-                      {i > 0 && funnelData[i-1].value > 0 && (
+                      {i > 0 && funnelData[i - 1].value > 0 && (
                         <span className="text-xs font-mono" style={{ color: f.fill }}>
-                          {Math.round((f.value / funnelData[i-1].value) * 100)}%
+                          {Math.round((f.value / funnelData[i - 1].value) * 100)}%
                         </span>
                       )}
                     </div>
@@ -206,7 +242,7 @@ export default function Dashboard({ initiatives, activities }) {
                 <XAxis type="number" tick={{ fill: '#6b7280', fontSize: 10 }} axisLine={false} tickLine={false} />
                 <YAxis type="category" dataKey="name" tick={{ fill: '#9ca3af', fontSize: 10 }} axisLine={false} tickLine={false} width={80} />
                 <Tooltip content={<CustomTooltip />} />
-                <Bar dataKey="quantity" name="Outreach" radius={[0,3,3,0]}>
+                <Bar dataKey={firstStage} name={firstStage} radius={[0, 3, 3, 0]}>
                   {platformData.map((_, i) => (
                     <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
                   ))}
@@ -226,7 +262,7 @@ export default function Dashboard({ initiatives, activities }) {
               <PieChart>
                 <Pie
                   data={typeData}
-                  dataKey="quantity"
+                  dataKey={firstStage}
                   nameKey="name"
                   cx="50%"
                   cy="50%"
@@ -247,9 +283,9 @@ export default function Dashboard({ initiatives, activities }) {
           )}
         </div>
 
-        {/* Response rate trend */}
+        {/* Conversion rate trend */}
         <div className="card p-4">
-          <h3 className="text-sm font-semibold text-gray-300 mb-4">Response Rate Trend</h3>
+          <h3 className="text-sm font-semibold text-gray-300 mb-4">{lastStage} Rate Trend</h3>
           {trendData.length < 2 ? (
             <div className="h-48 flex items-center justify-center text-gray-600 text-sm">Need more data</div>
           ) : (
@@ -261,8 +297,8 @@ export default function Dashboard({ initiatives, activities }) {
                 <Tooltip content={<CustomTooltip />} />
                 <Line
                   type="monotone"
-                  dataKey="responseRate"
-                  name="Response Rate"
+                  dataKey="conversionRate"
+                  name={`${lastStage} Rate`}
                   stroke="#818cf8"
                   strokeWidth={2}
                   dot={{ fill: '#818cf8', r: 3 }}
@@ -289,9 +325,6 @@ export default function Dashboard({ initiatives, activities }) {
                   { field: 'initiativeId', label: 'Initiative' },
                   { field: 'platform', label: 'Platform' },
                   { field: 'activityType', label: 'Type' },
-                  { field: 'quantity', label: 'Outreach' },
-                  { field: 'responseCount', label: 'Responses' },
-                  { field: 'conversionCount', label: 'Conv.' },
                 ].map(({ field, label }) => (
                   <th
                     key={field}
@@ -301,13 +334,18 @@ export default function Dashboard({ initiatives, activities }) {
                     {label}<SortIcon field={field} sortField={sortField} sortDir={sortDir} />
                   </th>
                 ))}
+                {stages.map((stage, idx) => (
+                  <th key={stage} className="table-header px-4 py-3 text-left whitespace-nowrap">
+                    <span style={{ color: CHART_COLORS[idx % CHART_COLORS.length] }}>{stage}</span>
+                  </th>
+                ))}
                 <th className="table-header px-4 py-3 text-left">Notes</th>
               </tr>
             </thead>
             <tbody>
               {recentActivities.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-4 py-8 text-center text-gray-600 text-sm">
+                  <td colSpan={5 + stages.length} className="px-4 py-8 text-center text-gray-600 text-sm">
                     No activities yet. Head to Smart Log to add some.
                   </td>
                 </tr>
@@ -325,9 +363,11 @@ export default function Dashboard({ initiatives, activities }) {
                     <td className="px-4 py-3">
                       <span className="badge bg-indigo-500/10 text-indigo-300 border border-indigo-500/20">{a.activityType}</span>
                     </td>
-                    <td className="px-4 py-3 text-cyan-400 font-mono font-semibold">{a.quantity}</td>
-                    <td className="px-4 py-3 text-violet-400 font-mono">{a.responseCount}</td>
-                    <td className="px-4 py-3 text-emerald-400 font-mono">{a.conversionCount}</td>
+                    {stages.map((stage, idx) => (
+                      <td key={stage} className="px-4 py-3 font-mono font-semibold" style={{ color: CHART_COLORS[idx % CHART_COLORS.length] }}>
+                        {getStageCount(a, stage)}
+                      </td>
+                    ))}
                     <td className="px-4 py-3 text-gray-500 text-xs max-w-[200px] truncate">{a.notes || '—'}</td>
                   </tr>
                 );

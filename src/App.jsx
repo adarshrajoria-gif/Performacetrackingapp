@@ -2,97 +2,89 @@ import { useState, useEffect, useCallback } from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { Layout } from './components/Layout';
 import { ToastContainer } from './components/Toast';
-import { ApiKeyModal } from './components/ApiKeyModal';
 import Dashboard from './pages/Dashboard';
 import Log from './pages/Log';
 import Initiatives from './pages/Initiatives';
 import Settings from './pages/Settings';
-import {
-  getInitiatives, getActivities, getApiKey,
-  setInitiatives, setActivities, markSeeded, isSeeded,
-} from './utils/storage';
-import { seedInitiatives, seedActivities } from './utils/seedData';
+import { getSheetsUrl } from './utils/storage';
+import { loadData, isConnected } from './utils/dataService';
 import { useToast } from './hooks/useToast';
 
 function App() {
   const [initiatives, setInitiativesState] = useState([]);
   const [activities, setActivitiesState] = useState([]);
-  const [apiKey, setApiKeyState] = useState(null);
-  const [showApiKeyModal, setShowApiKeyModal] = useState(false);
+  const [sheetsUrl, setSheetsUrlState] = useState(getSheetsUrl());
+  const [loading, setLoading] = useState(true);
   const { toasts, addToast, removeToast } = useToast();
 
-  // Load data from localStorage
-  const loadData = useCallback(() => {
-    setInitiativesState(getInitiatives());
-    setActivitiesState(getActivities());
-    setApiKeyState(getApiKey());
-  }, []);
-
-  useEffect(() => {
-    // Seed on first run
-    if (!isSeeded()) {
-      setInitiatives(seedInitiatives);
-      setActivities(seedActivities);
-      markSeeded();
+  // Load data from Sheets (primary) or localStorage (fallback)
+  const refreshData = useCallback(async (opts = {}) => {
+    try {
+      const data = await loadData();
+      setInitiativesState(data.initiatives);
+      setActivitiesState(data.activities);
+      if (opts.silent !== true && opts.showSuccess) {
+        addToast('Data synced from Google Sheets');
+      }
+    } catch (err) {
+      console.error('Failed to load data:', err);
+      if (opts.silent !== true) {
+        addToast('Failed to load data', 'error');
+      }
     }
-    loadData();
-  }, [loadData]);
-
-  const handleDataChange = useCallback(() => {
-    setInitiativesState(getInitiatives());
-    setActivitiesState(getActivities());
-  }, []);
-
-  const handleApiKeySave = useCallback((key) => {
-    setApiKeyState(key);
-    addToast('API key saved — AI features enabled');
   }, [addToast]);
 
-  const handleSetCurrentApiKey = useCallback((key) => {
-    setApiKeyState(key);
-  }, []);
+  // Initial load
+  useEffect(() => {
+    setLoading(true);
+    refreshData({ silent: true }).finally(() => setLoading(false));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleSheetsUrlSave = useCallback((url) => {
+    setSheetsUrlState(url);
+    if (url) {
+      refreshData({ showSuccess: true });
+    }
+  }, [refreshData]);
 
   const sharedProps = {
     initiatives,
     activities,
-    onDataChange: handleDataChange,
-    apiKey,
+    refreshData,
     addToast,
+    sheetsConnected: isConnected(),
   };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-950 flex items-center justify-center">
+        <div className="text-center space-y-3">
+          <div className="w-8 h-8 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin mx-auto" />
+          <p className="text-sm text-gray-500">Loading data{isConnected() ? ' from Google Sheets' : ''}…</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <BrowserRouter>
       <Routes>
-        <Route element={<Layout apiKey={apiKey} />}>
+        <Route element={<Layout sheetsConnected={isConnected()} />}>
           <Route path="/" element={<Dashboard {...sharedProps} />} />
-          <Route
-            path="/log"
-            element={
-              <Log
-                {...sharedProps}
-                onNeedApiKey={() => setShowApiKeyModal(true)}
-              />
-            }
-          />
+          <Route path="/log" element={<Log {...sharedProps} />} />
           <Route path="/initiatives" element={<Initiatives {...sharedProps} />} />
           <Route
             path="/settings"
             element={
               <Settings
                 {...sharedProps}
-                setCurrentApiKey={handleSetCurrentApiKey}
+                sheetsUrl={sheetsUrl}
+                onSheetsUrlSave={handleSheetsUrlSave}
               />
             }
           />
         </Route>
       </Routes>
-
-      {showApiKeyModal && (
-        <ApiKeyModal
-          onClose={() => setShowApiKeyModal(false)}
-          onSave={handleApiKeySave}
-        />
-      )}
 
       <ToastContainer toasts={toasts} removeToast={removeToast} />
     </BrowserRouter>

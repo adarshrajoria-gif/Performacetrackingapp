@@ -2,8 +2,7 @@
 const KEYS = {
   INITIATIVES: 'it_initiatives',
   ACTIVITIES: 'it_activities',
-  API_KEY: 'it_api_key',
-  SEEDED: 'it_seeded',
+  SHEETS_URL: 'it_sheets_url',
 };
 
 export const storage = {
@@ -69,14 +68,11 @@ export const deleteActivity = (id) => {
   setActivities(getActivities().filter((a) => a.id !== id));
 };
 
-// API Key
-export const getApiKey = () => storage.get(KEYS.API_KEY);
-export const setApiKey = (key) => storage.set(KEYS.API_KEY, key);
-export const clearApiKey = () => storage.remove(KEYS.API_KEY);
 
-// Seeded flag
-export const isSeeded = () => !!storage.get(KEYS.SEEDED);
-export const markSeeded = () => storage.set(KEYS.SEEDED, true);
+// Google Sheets URL
+export const getSheetsUrl = () => storage.get(KEYS.SHEETS_URL) || '';
+export const setSheetsUrl = (url) => storage.set(KEYS.SHEETS_URL, url);
+export const clearSheetsUrl = () => storage.remove(KEYS.SHEETS_URL);
 
 // Export / Import
 export const exportData = () => {
