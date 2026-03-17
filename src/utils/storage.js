@@ -70,7 +70,18 @@ export const deleteActivity = (id) => {
 
 
 // Google Sheets URL
-export const getSheetsUrl = () => storage.get(KEYS.SHEETS_URL) || '';
+export const getSheetsUrl = () => {
+  // 1. Check localStorage (Manual override/settings)
+  const local = storage.get(KEYS.SHEETS_URL);
+  if (local) return local;
+
+  // 2. Fallback to Environment Variable (Team shared/deployment default)
+  const env = import.meta.env.VITE_SHEETS_URL;
+  if (env) return env;
+
+  return '';
+};
+
 export const setSheetsUrl = (url) => storage.set(KEYS.SHEETS_URL, url);
 export const clearSheetsUrl = () => storage.remove(KEYS.SHEETS_URL);
 

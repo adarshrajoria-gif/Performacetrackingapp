@@ -34,31 +34,8 @@ function App() {
     }
   }, [addToast]);
 
-  // Initial load + Query Param configuration support
+  // Initial load
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const configUrl = params.get('config');
-
-    if (configUrl) {
-      try {
-        // Decode if it was base64 encoded for safety/cleanliness
-        const decoded = configUrl.startsWith('http') ? configUrl : atob(configUrl);
-        if (decoded.startsWith('https://script.google.com')) {
-          import('./utils/storage').then(({ setSheetsUrl }) => {
-            setSheetsUrl(decoded);
-            setSheetsUrlState(decoded);
-            addToast('Shared configuration applied!', 'info');
-            // Remove the query param from the URL to keep it clean
-            window.history.replaceState({}, document.title, window.location.pathname);
-            refreshData({ silent: true }).finally(() => setLoading(false));
-          });
-          return;
-        }
-      } catch (e) {
-        console.error('Failed to parse share config', e);
-      }
-    }
-
     setLoading(true);
     refreshData({ silent: true }).finally(() => setLoading(false));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
