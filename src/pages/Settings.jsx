@@ -190,6 +190,39 @@ export default function Settings({ refreshData, addToast, sheetsUrl, onSheetsUrl
         </div>
       </div>
 
+      {/* Share with Team */}
+      {sheetsConnected && sheetsUrl && (
+        <div className="card p-5 space-y-4 border-cyan-500/20 bg-cyan-500/[0.02]">
+          <div className="flex items-center gap-2">
+            <RefreshCw size={16} className="text-cyan-400" />
+            <h2 className="text-sm font-semibold text-gray-200">Share with Team</h2>
+          </div>
+          <p className="text-xs text-gray-500">
+            Generate a configured link for your manager or teammates. When they open this link, their dashboard will automatically connect to your Google Sheets data.
+          </p>
+
+          <div className="flex gap-2">
+            <input
+              readOnly
+              value={`${window.location.origin}/?config=${btoa(sheetsUrl)}`}
+              className="input font-mono text-[10px] bg-gray-900 flex-1 truncate py-2.5"
+            />
+            <button
+              onClick={() => {
+                const url = `${window.location.origin}/?config=${btoa(sheetsUrl)}`;
+                navigator.clipboard.writeText(url).then(() => {
+                  addToast('Share link copied to clipboard!');
+                });
+              }}
+              className="btn-primary flex items-center justify-center gap-2 whitespace-nowrap"
+            >
+              <Copy size={14} />
+              Copy Link
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Data Management */}
       <div className="card p-5 space-y-4">
         <div className="flex items-center gap-2">
