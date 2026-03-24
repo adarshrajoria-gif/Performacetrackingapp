@@ -2,7 +2,8 @@
 const KEYS = {
   INITIATIVES: 'it_initiatives',
   ACTIVITIES: 'it_activities',
-  SHEETS_URL: 'it_sheets_url',
+  SUPABASE_URL: 'it_supabase_url',
+  SUPABASE_KEY: 'it_supabase_key',
 };
 
 export const storage = {
@@ -69,21 +70,35 @@ export const deleteActivity = (id) => {
 };
 
 
-// Google Sheets URL
-export const getSheetsUrl = () => {
+// Supabase Config
+export const getSupabaseConfig = () => {
   // 1. Check localStorage (Manual override/settings)
-  const local = storage.get(KEYS.SHEETS_URL);
-  if (local) return local;
+  const localUrl = storage.get(KEYS.SUPABASE_URL);
+  const localKey = storage.get(KEYS.SUPABASE_KEY);
+  
+  if (localUrl && localKey) {
+    return { url: localUrl, key: localKey };
+  }
 
-  // 2. Fallback to Environment Variable (Team shared/deployment default)
-  const env = import.meta.env.VITE_SHEETS_URL;
-  if (env) return env;
+  // 2. Fallback to Environment Variable
+  const envUrl = import.meta.env.VITE_SUPABASE_URL;
+  const envKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+  
+  if (envUrl && envKey) {
+    return { url: envUrl, key: envKey };
+  }
 
-  return '';
+  return { url: '', key: '' };
 };
 
-export const setSheetsUrl = (url) => storage.set(KEYS.SHEETS_URL, url);
-export const clearSheetsUrl = () => storage.remove(KEYS.SHEETS_URL);
+export const setSupabaseConfig = (url, key) => {
+  storage.set(KEYS.SUPABASE_URL, url);
+  storage.set(KEYS.SUPABASE_KEY, key);
+};
+export const clearSupabaseConfig = () => {
+  storage.remove(KEYS.SUPABASE_URL);
+  storage.remove(KEYS.SUPABASE_KEY);
+};
 
 // Export / Import
 export const exportData = () => {

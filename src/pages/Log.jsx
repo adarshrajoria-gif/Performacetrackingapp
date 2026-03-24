@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Plus, Trash2, ChevronDown, Loader, Check, X, Edit2, Filter } from 'lucide-react';
 import { addActivity as dsAddActivity, deleteActivity as dsDeleteActivity, updateActivity as dsUpdateActivity } from '../utils/dataService';
 import { generateId, todayStr, formatDate, normalizeDate, CHART_COLORS, getPlatformIcon, collectStages, getStageValue } from '../utils/helpers';
@@ -162,9 +162,11 @@ function EditableRow({ activity, initiatives, onSave, onCancel, saving }) {
 
 // ─── Display-only table row ───────────────────────────────────────────────────
 
-function DisplayRow({ activity, initiative, stages, onEdit, onDelete, deletingId }) {
-  const PlatformIcon = getPlatformIcon(activity.platform);
+const PlatformIconWrapper = ({ platform }) => {
+  return React.createElement(getPlatformIcon(platform), { size: 12, className: "text-gray-400" });
+};
 
+function DisplayRow({ activity, stages, onEdit, onDelete, deletingId }) {
   return (
     <tr
       className="table-row text-xs cursor-pointer hover:bg-gray-800/60 transition-colors group"
@@ -176,7 +178,7 @@ function DisplayRow({ activity, initiative, stages, onEdit, onDelete, deletingId
       </td>
       <td className="px-3 py-2.5">
         <div className="flex items-center gap-2">
-          <PlatformIcon size={12} className="text-gray-400" />
+          <PlatformIconWrapper platform={activity.platform} />
           <span className="badge bg-gray-800 text-gray-300 border border-gray-700">{activity.platform}</span>
         </div>
       </td>
