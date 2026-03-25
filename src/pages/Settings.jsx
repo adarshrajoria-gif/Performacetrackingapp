@@ -14,28 +14,56 @@ export default function Settings({ refreshData, addToast, onSupabaseConfigSave, 
   const [clearing, setClearing] = useState(false);
 
   // Define SQL schema block
-  const SQL_SCHEMA = `-- Initiatives Table
+  // Define SQL schema block
+  const SQL_SCHEMA = `-- 1) initiatives
 CREATE TABLE initiatives (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  name TEXT NOT NULL,
-  description TEXT,
-  status TEXT DEFAULT 'active',
-  "createdAt" TIMESTAMPTZ DEFAULT now(),
-  platforms TEXT[] DEFAULT '{}',
-  "activityTypes" TEXT[] DEFAULT '{}',
-  "funnelStages" TEXT[] DEFAULT '{}'
+ id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+ name text NOT NULL,
+ description text,
+ status text DEFAULT 'active',
+ "createdAt" date DEFAULT now(),
+ "exportedAt" timestamptz
 );
 
--- Activities Table
+-- 2) lookup tables
+CREATE TABLE platforms ( id uuid PRIMARY KEY DEFAULT gen_random_uuid(), name text UNIQUE NOT NULL );
+CREATE TABLE activity_types ( id uuid PRIMARY KEY DEFAULT gen_random_uuid(), name text UNIQUE NOT NULL );
+CREATE TABLE funnel_stages ( id uuid PRIMARY KEY DEFAULT gen_random_uuid(), name text UNIQUE NOT NULL );
+
+-- 3) Join tables
+CREATE TABLE initiative_platforms (
+ initiative_id uuid REFERENCES initiatives(id) ON DELETE CASCADE,
+ platform_id uuid REFERENCES platforms(id) ON DELETE CASCADE,
+ PRIMARY KEY (initiative_id, platform_id)
+);
+CREATE TABLE initiative_activity_types (
+ initiative_id uuid REFERENCES initiatives(id) ON DELETE CASCADE,
+ activity_type_id uuid REFERENCES activity_types(id) ON DELETE CASCADE,
+ PRIMARY KEY (initiative_id, activity_type_id)
+);
+CREATE TABLE initiative_funnel_stages (
+ initiative_id uuid REFERENCES initiatives(id) ON DELETE CASCADE,
+ funnel_stage_id uuid REFERENCES funnel_stages(id) ON DELETE CASCADE,
+ PRIMARY KEY (initiative_id, funnel_stage_id)
+);
+
+-- 4) activities
 CREATE TABLE activities (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  "initiativeId" UUID REFERENCES initiatives(id) ON DELETE CASCADE,
-  "date" TIMESTAMPTZ DEFAULT now(),
-  platform TEXT,
-  "activityType" TEXT,
-  title TEXT NOT NULL,
-  notes TEXT,
-  "stageCounts" JSONB DEFAULT '{}'::jsonb
+ id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+ initiative_id uuid NOT NULL REFERENCES initiatives(id) ON DELETE CASCADE,
+ date date DEFAULT now(),
+ platform text,
+ activity_type text,
+ title text,
+ notes text
+);
+
+-- 5) stage counts
+CREATE TABLE activity_stage_counts (
+ activity_id uuid NOT NULL REFERENCES activities(id) ON DELETE CASCADE,
+ funnel_stage_id uuid NOT NULL REFERENCES funnel_stages(id) ON DELETE CASCADE,
+ count integer NOT NULL DEFAULT 0,
+ PRIMARY KEY (activity_id, funnel_stage_id)
 );`;
 
   const [codeCopied, setCodeCopied] = useState(false);
@@ -58,7 +86,7 @@ CREATE TABLE activities (
       addToast('Supabase disconnected', 'info');
       return;
     }
-    
+
     setSupabaseConfig(trimmedUrl, trimmedKey);
     onSupabaseConfigSave();
     setConfigSaved(true);
@@ -74,7 +102,7 @@ CREATE TABLE activities (
 
       const { error } = await supabase.from('initiatives').select('id', { count: 'exact', head: true });
       if (error) throw error;
-      
+
       const { error: actError } = await supabase.from('activities').select('id', { count: 'exact', head: true });
       if (actError) throw actError;
 
@@ -300,3 +328,4 @@ CREATE TABLE activities (
     </div>
   );
 }
+
