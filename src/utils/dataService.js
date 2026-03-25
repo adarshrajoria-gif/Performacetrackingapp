@@ -1,4 +1,4 @@
-
+// ─── Data Service ─────────────────────────────────────────────────────────────
 // Supabase-first, localStorage-cache abstraction layer.
 // All methods are async. When Supabase is configured, it's the source of truth.
 // localStorage is updated as a cache after every successful Supabase operation.
@@ -29,7 +29,7 @@ export async function loadData() {
 
  if (supabase) {
  try {
- // Fetch initiatives with related data via join tables
+ // 1. Fetch initiatives with their relational data
  const { data: initData, error: initError } = await supabase
  .from('initiatives')
  .select(`
@@ -52,7 +52,7 @@ export async function loadData() {
  funnelStages: i.funnelStages?.map(fs => fs.funnel_stages?.name).filter(Boolean) || []
  }));
 
- // Fetch activities with stage counts
+ // 2. Fetch activities with their stage counts
  const { data: actData, error: actError } = await supabase
  .from('activities')
  .select(`
@@ -63,7 +63,6 @@ export async function loadData() {
  if (actError) throw actError;
 
  activities = actData.map(a => {
- // Map DB columns to frontend camelCase keys
  const activity = {
  id: a.id,
  initiativeId: a.initiative_id,
@@ -75,7 +74,6 @@ export async function loadData() {
  stageCounts: {}
  };
 
- // Transform the array of count objects into a flat stageCounts object
  if (a.counts && Array.isArray(a.counts)) {
  a.counts.forEach(c => {
  const stageName = c.funnel_stages?.name;
@@ -84,7 +82,6 @@ export async function loadData() {
  }
  });
  }
-
  return normalizeActivity(activity);
  });
  } catch (err) {
@@ -97,7 +94,6 @@ export async function loadData() {
  activities = getActivities();
  }
 
- // Sync cache locally if we got data (even if empty)
  if (supabase) {
  setInitiatives(initiatives);
  setActivities(activities);
@@ -108,13 +104,50 @@ export async function loadData() {
 
 // ─── Initiative CRUD ──────────────────────────────────────────────────────────
 
+// Helper to sync many-to-many relations for an initiative
+async function syncInitiativeRelations(supabase, initiativeId, { platforms, activityTypes, funnelStages }) {
+ // 1. Sync Platforms
+ if (platforms) {
+ // Ensure all platform names exist in the platforms lookup table
+ const { data: pItems } = await supabase.from('platforms').upsert(platforms.map(name => ({ name })), { onConflict: 'name' }).select();
+ // Clear old relations and insert new ones
+ await supabase.from('initiative_platforms').delete().eq('initiative_id', initiativeId);
+ if (pItems?.length) {
+ await supabase.from('initiative_platforms').insert(pItems.map(p => ({ initiative_id: initiativeId, platform_id: p.id })));
+ }
+ }
+
+ // 2. Sync Activity Types
+ if (activityTypes) {
+ const { data: atItems } = await supabase.from('activity_types').upsert(activityTypes.map(name => ({ name })), { onConflict: 'name' }).select();
+ await supabase.from('initiative_activity_types').delete().eq('initiative_id', initiativeId);
+ if (atItems?.length) {
+ await supabase.from('initiative_activity_types').insert(atItems.map(at => ({ initiative_id: initiativeId, activity_type_id: at.id })));
+ }
+ }
+
+ // 3. Sync Funnel Stages
+ if (funnelStages) {
+ const { data: fsItems } = await supabase.from('funnel_stages').upsert(funnelStages.map(name => ({ name })), { onConflict: 'name' }).select();
+ await supabase.from('initiative_funnel_stages').delete().eq('initiative_id', initiativeId);
+ if (fsItems?.length) {
+ await supabase.from('initiative_funnel_stages').insert(fsItems.map(fs => ({ initiative_id: initiativeId, funnel_stage_id: fs.id })));
+ }
+ }
+}
+
 export async function addInitiative(initiative) {
  const supabase = getSupabase();
  if (supabase) {
  try {
- const { error } = await supabase.from('initiatives').insert(initiative);
+ // Separate relational arrays from core table fields
+ const { platforms, activityTypes, funnelStages, ...coreFields } = initiative;
+ const { error } = await supabase.from('initiatives').insert(coreFields);
  if (error) throw error;
- // Update local cache
+
+ // Sync the many-to-many mappings
+ await syncInitiativeRelations(supabase, initiative.id, { platforms, activityTypes, funnelStages });
+
  const list = getInitiatives();
  list.push(initiative);
  setInitiatives(list);
@@ -132,8 +165,18 @@ export async function updateInitiative(id, updates) {
  const supabase = getSupabase();
  if (supabase) {
  try {
- const { error } = await supabase.from('initiatives').update(updates).eq('id', id);
+ const { platforms, activityTypes, funnelStages, ...coreFields } = updates;
+ // Update core fields if any
+ if (Object.keys(coreFields).length > 0) {
+ const { error } = await supabase.from('initiatives').update(coreFields).eq('id', id);
  if (error) throw error;
+ }
+
+ // Sync relations if any were provided
+ if (platforms || activityTypes || funnelStages) {
+ await syncInitiativeRelations(supabase, id, { platforms, activityTypes, funnelStages });
+ }
+
  const list = getInitiatives().map((i) => (i.id === id ? { ...i, ...updates } : i));
  setInitiatives(list);
  return;
@@ -164,16 +207,51 @@ export async function deleteInitiative(id) {
 
 // ─── Activity CRUD ────────────────────────────────────────────────────────────
 
+// Helper to sync stage counts for an activity
+async function syncActivityCounts(supabase, activityId, stageCounts) {
+ if (!stageCounts || typeof stageCounts !== 'object') return;
+
+ const stageNames = Object.keys(stageCounts);
+ if (!stageNames.length) return;
+
+ // 1. Ensure all stage names exist in lookup and get their IDs
+ const { data: fsItems } = await supabase.from('funnel_stages').upsert(stageNames.map(name => ({ name })), { onConflict: 'name' }).select();
+
+ if (fsItems) {
+ const countRows = fsItems.map(fs => ({
+ activity_id: activityId,
+ funnel_stage_id: fs.id,
+ count: stageCounts[fs.name] || 0
+ }));
+
+ // 2. Clear old counts and insert new ones
+ await supabase.from('activity_stage_counts').delete().eq('activity_id', activityId);
+ await supabase.from('activity_stage_counts').insert(countRows);
+ }
+}
+
 export async function addActivity(activity) {
  const supabase = getSupabase();
  if (supabase) {
  try {
  const initList = getInitiatives();
- const normalized = normalizeActivity(activity, initList);
- const { error } = await supabase.from('activities').insert(normalized);
+ const { stageCounts, initiativeId, activityType, ...core } = normalizeActivity(activity, initList);
+
+ // Map to snake_case for DB
+ const dbActivity = {
+ ...core,
+ initiative_id: initiativeId,
+ activity_type: activityType
+ };
+
+ const { error } = await supabase.from('activities').insert(dbActivity);
  if (error) throw error;
+
+ // Sync the relational stage counts
+ await syncActivityCounts(supabase, activity.id, stageCounts);
+
  const actList = getActivities();
- actList.push(normalized);
+ actList.push(activity);
  setActivities(actList);
  return;
  } catch (err) {
@@ -188,15 +266,12 @@ export async function addActivity(activity) {
 export async function addActivities(activities) {
  const supabase = getSupabase();
  if (supabase) {
- try {
- const { error } = await supabase.from('activities').insert(activities);
- if (error) throw error;
- const current = getActivities();
- setActivities([...current, ...activities]);
- return;
- } catch (err) {
- console.warn('Supabase addActivities failed, saving locally:', err.message);
+ // For simplicity, we loop through addActivity for bulk inserts to ensure counts are synced
+ // In a production app, this should be optimized into a single batch
+ for (const act of activities) {
+ await addActivity(act);
  }
+ return;
  }
  const current = getActivities();
  setActivities([...current, ...activities]);
@@ -206,8 +281,21 @@ export async function updateActivity(id, updates) {
  const supabase = getSupabase();
  if (supabase) {
  try {
- const { error } = await supabase.from('activities').update(updates).eq('id', id);
+ const { stageCounts, initiativeId, activityType, ...core } = updates;
+
+ const dbUpdates = { ...core };
+ if (initiativeId) dbUpdates.initiative_id = initiativeId;
+ if (activityType) dbUpdates.activity_type = activityType;
+
+ if (Object.keys(dbUpdates).length > 0) {
+ const { error } = await supabase.from('activities').update(dbUpdates).eq('id', id);
  if (error) throw error;
+ }
+
+ if (stageCounts) {
+ await syncActivityCounts(supabase, id, stageCounts);
+ }
+
  const inits = getInitiatives();
  const list = getActivities().map((a) => (a.id === id ? normalizeActivity({ ...a, ...updates }, inits) : a));
  setActivities(list);
