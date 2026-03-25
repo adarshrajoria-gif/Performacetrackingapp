@@ -99,8 +99,6 @@ function InitiativeCard({ initiative, activities, onEdit, onDelete, deleting }) 
   const metrics = computeMetrics(initActivities, stages);
 
   // Show first 3 stages as metric cards
-  const displayStages = stages.slice(0, 3);
-
   return (
     <div className="card p-5 space-y-4 hover:border-gray-700 transition-colors">
       {/* Header */}

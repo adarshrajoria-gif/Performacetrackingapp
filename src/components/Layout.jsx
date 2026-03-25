@@ -1,3 +1,4 @@
+import React from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 import { LayoutDashboard, PenLine, Flag, Settings, Zap, Cloud, HardDrive } from 'lucide-react';
 
@@ -8,7 +9,7 @@ const navItems = [
   { to: '/settings', label: 'Settings', icon: Settings },
 ];
 
-export function Layout({ sheetsConnected }) {
+export function Layout({ supabaseConnected }) {
   return (
     <div className="min-h-screen bg-gray-950 flex flex-col">
       {/* Topbar */}
@@ -24,28 +25,28 @@ export function Layout({ sheetsConnected }) {
 
           {/* Nav */}
           <nav className="flex items-center gap-1">
-            {navItems.map(({ to, label, icon: Icon, end }) => (
+            {navItems.map((item) => (
               <NavLink
-                key={to}
-                to={to}
-                end={end}
+                key={item.to}
+                to={item.to}
+                end={item.end}
                 className={({ isActive }) =>
                   `flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${isActive ? 'tab-active' : 'tab-inactive'
                   }`
                 }
               >
-                <Icon size={14} />
-                <span className="hidden sm:inline">{label}</span>
+                {React.createElement(item.icon, { size: 14 })}
+                <span className="hidden sm:inline">{item.label}</span>
               </NavLink>
             ))}
           </nav>
 
           {/* Connection status */}
           <div className="flex items-center gap-2 flex-shrink-0">
-            {sheetsConnected ? (
+            {supabaseConnected ? (
               <div className="flex items-center gap-1.5 text-xs text-cyan-400 bg-cyan-500/10 border border-cyan-500/20 px-2.5 py-1 rounded-full">
                 <Cloud size={11} />
-                <span className="hidden sm:inline">Sheets</span>
+                <span className="hidden sm:inline">Supabase</span>
               </div>
             ) : (
               <div className="flex items-center gap-1.5 text-xs text-gray-500 bg-gray-800 border border-gray-700 px-2.5 py-1 rounded-full">
@@ -64,7 +65,7 @@ export function Layout({ sheetsConnected }) {
 
       {/* Footer */}
       <footer className="border-t border-gray-800 py-3 text-center">
-        <p className="text-xs text-gray-600">InitiativeTracker — {sheetsConnected ? 'synced with Google Sheets' : 'data stored locally'}</p>
+        <p className="text-xs text-gray-600">InitiativeTracker — {supabaseConnected ? 'synced with Supabase' : 'data stored locally'}</p>
       </footer>
     </div>
   );

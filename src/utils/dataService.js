@@ -1,32 +1,23 @@
 // ─── Data Service ─────────────────────────────────────────────────────────────
-// Sheets-first, localStorage-cache abstraction layer.
-// All methods are async. When Sheets is configured, it's the source of truth.
-// localStorage is updated as a cache after every successful Sheets operation.
-// If Sheets is unavailable, operations fall back to localStorage.
+// Supabase-first, localStorage-cache abstraction layer.
+// All methods are async. When Supabase is configured, it's the source of truth.
+// localStorage is updated as a cache after every successful Supabase operation.
+// If Supabase is unavailable, operations fall back to localStorage.
 
 import {
     getInitiatives, setInitiatives,
     getActivities, setActivities,
-    getSheetsUrl,
+    getSupabaseConfig,
 } from './storage';
 
-import {
-    loadFromSheets,
-    sheetsAddInitiative, sheetsUpdateInitiative, sheetsDeleteInitiative,
-    sheetsAddActivity, sheetsAddActivities, sheetsUpdateActivity, sheetsDeleteActivity,
-    sheetsClearAll, saveToSheets,
-} from './sheetsApi';
-
+import { getSupabase } from './supabaseClient';
 import { normalizeDate, normalizeActivity } from './helpers';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function url() {
-    return getSheetsUrl();
-}
-
 function isConnected() {
-    return !!url();
+    const { url, key } = getSupabaseConfig();
+    return !!(url && key);
 }
 
 // ─── Load ─────────────────────────────────────────────────────────────────────
@@ -34,21 +25,29 @@ function isConnected() {
 export async function loadData() {
     let initiatives = [];
     let activities = [];
-    const sheetsUrl = url();
+    const supabase = getSupabase();
 
-    if (sheetsUrl) {
+    if (supabase) {
         try {
-            const data = await loadFromSheets(sheetsUrl);
-            initiatives = data.initiatives.map(i => ({
+            const [initRes, actRes] = await Promise.all([
+                supabase.from('initiatives').select('*'),
+                supabase.from('activities').select('*')
+            ]);
+            
+            if (initRes.error) throw initRes.error;
+            if (actRes.error) throw actRes.error;
+
+            initiatives = initRes.data.map(i => ({
                 ...i,
                 createdAt: normalizeDate(i.createdAt),
             }));
-            activities = data.activities.map(a => normalizeActivity({
+            
+            activities = actRes.data.map(a => normalizeActivity({
                 ...a,
                 date: normalizeDate(a.date),
             }, initiatives));
         } catch (err) {
-            console.warn('Sheets load failed, using local cache:', err.message);
+            console.warn('Supabase load failed, using local cache:', err.message);
             initiatives = getInitiatives();
             activities = getActivities();
         }
@@ -58,7 +57,7 @@ export async function loadData() {
     }
 
     // Sync cache locally if we got data (even if empty)
-    if (sheetsUrl) {
+    if (supabase) {
         setInitiatives(initiatives);
         setActivities(activities);
     }
@@ -69,17 +68,18 @@ export async function loadData() {
 // ─── Initiative CRUD ──────────────────────────────────────────────────────────
 
 export async function addInitiative(initiative) {
-    const sheetsUrl = url();
-    if (sheetsUrl) {
+    const supabase = getSupabase();
+    if (supabase) {
         try {
-            await sheetsAddInitiative(sheetsUrl, initiative);
+            const { error } = await supabase.from('initiatives').insert(initiative);
+            if (error) throw error;
             // Update local cache
             const list = getInitiatives();
             list.push(initiative);
             setInitiatives(list);
             return;
         } catch (err) {
-            console.warn('Sheets addInitiative failed, saving locally:', err.message);
+            console.warn('Supabase addInitiative failed, saving locally:', err.message);
         }
     }
     const list = getInitiatives();
@@ -88,15 +88,16 @@ export async function addInitiative(initiative) {
 }
 
 export async function updateInitiative(id, updates) {
-    const sheetsUrl = url();
-    if (sheetsUrl) {
+    const supabase = getSupabase();
+    if (supabase) {
         try {
-            await sheetsUpdateInitiative(sheetsUrl, id, updates);
+            const { error } = await supabase.from('initiatives').update(updates).eq('id', id);
+            if (error) throw error;
             const list = getInitiatives().map((i) => (i.id === id ? { ...i, ...updates } : i));
             setInitiatives(list);
             return;
         } catch (err) {
-            console.warn('Sheets updateInitiative failed, saving locally:', err.message);
+            console.warn('Supabase updateInitiative failed, saving locally:', err.message);
         }
     }
     const list = getInitiatives().map((i) => (i.id === id ? { ...i, ...updates } : i));
@@ -104,15 +105,16 @@ export async function updateInitiative(id, updates) {
 }
 
 export async function deleteInitiative(id) {
-    const sheetsUrl = url();
-    if (sheetsUrl) {
+    const supabase = getSupabase();
+    if (supabase) {
         try {
-            await sheetsDeleteInitiative(sheetsUrl, id);
+            const { error } = await supabase.from('initiatives').delete().eq('id', id);
+            if (error) throw error;
             setInitiatives(getInitiatives().filter((i) => i.id !== id));
             setActivities(getActivities().filter((a) => a.initiativeId !== id));
             return;
         } catch (err) {
-            console.warn('Sheets deleteInitiative failed, saving locally:', err.message);
+            console.warn('Supabase deleteInitiative failed, saving locally:', err.message);
         }
     }
     setInitiatives(getInitiatives().filter((i) => i.id !== id));
@@ -122,18 +124,19 @@ export async function deleteInitiative(id) {
 // ─── Activity CRUD ────────────────────────────────────────────────────────────
 
 export async function addActivity(activity) {
-    const sheetsUrl = url();
-    if (sheetsUrl) {
+    const supabase = getSupabase();
+    if (supabase) {
         try {
             const initList = getInitiatives();
             const normalized = normalizeActivity(activity, initList);
-            await sheetsAddActivity(sheetsUrl, normalized);
+            const { error } = await supabase.from('activities').insert(normalized);
+            if (error) throw error;
             const actList = getActivities();
             actList.push(normalized);
             setActivities(actList);
             return;
         } catch (err) {
-            console.warn('Sheets addActivity failed, saving locally:', err.message);
+            console.warn('Supabase addActivity failed, saving locally:', err.message);
         }
     }
     const list = getActivities();
@@ -142,15 +145,16 @@ export async function addActivity(activity) {
 }
 
 export async function addActivities(activities) {
-    const sheetsUrl = url();
-    if (sheetsUrl) {
+    const supabase = getSupabase();
+    if (supabase) {
         try {
-            await sheetsAddActivities(sheetsUrl, activities);
+            const { error } = await supabase.from('activities').insert(activities);
+            if (error) throw error;
             const current = getActivities();
             setActivities([...current, ...activities]);
             return;
         } catch (err) {
-            console.warn('Sheets addActivities failed, saving locally:', err.message);
+            console.warn('Supabase addActivities failed, saving locally:', err.message);
         }
     }
     const current = getActivities();
@@ -158,16 +162,17 @@ export async function addActivities(activities) {
 }
 
 export async function updateActivity(id, updates) {
-    const sheetsUrl = url();
-    if (sheetsUrl) {
+    const supabase = getSupabase();
+    if (supabase) {
         try {
-            await sheetsUpdateActivity(sheetsUrl, id, updates);
+            const { error } = await supabase.from('activities').update(updates).eq('id', id);
+            if (error) throw error;
             const inits = getInitiatives();
             const list = getActivities().map((a) => (a.id === id ? normalizeActivity({ ...a, ...updates }, inits) : a));
             setActivities(list);
             return;
         } catch (err) {
-            console.warn('Sheets updateActivity failed, saving locally:', err.message);
+            console.warn('Supabase updateActivity failed, saving locally:', err.message);
         }
     }
     const list = getActivities().map((a) => (a.id === id ? { ...a, ...updates } : a));
@@ -175,14 +180,15 @@ export async function updateActivity(id, updates) {
 }
 
 export async function deleteActivity(id) {
-    const sheetsUrl = url();
-    if (sheetsUrl) {
+    const supabase = getSupabase();
+    if (supabase) {
         try {
-            await sheetsDeleteActivity(sheetsUrl, id);
+            const { error } = await supabase.from('activities').delete().eq('id', id);
+            if (error) throw error;
             setActivities(getActivities().filter((a) => a.id !== id));
             return;
         } catch (err) {
-            console.warn('Sheets deleteActivity failed, saving locally:', err.message);
+            console.warn('Supabase deleteActivity failed, saving locally:', err.message);
         }
     }
     setActivities(getActivities().filter((a) => a.id !== id));
@@ -191,12 +197,15 @@ export async function deleteActivity(id) {
 // ─── Bulk ─────────────────────────────────────────────────────────────────────
 
 export async function clearAllData() {
-    const sheetsUrl = url();
-    if (sheetsUrl) {
+    const supabase = getSupabase();
+    if (supabase) {
         try {
-            await sheetsClearAll(sheetsUrl);
+            await Promise.all([
+                supabase.from('activities').delete().neq('id', 'temp'), // Delete all
+                supabase.from('initiatives').delete().neq('id', 'temp')
+            ]);
         } catch (err) {
-            console.warn('Sheets clearAll failed:', err.message);
+            console.warn('Supabase clearAll failed:', err.message);
         }
     }
     setInitiatives([]);
@@ -204,12 +213,19 @@ export async function clearAllData() {
 }
 
 export async function importData(initiatives, activities) {
-    const sheetsUrl = url();
-    if (sheetsUrl) {
+    const supabase = getSupabase();
+    if (supabase) {
         try {
-            await saveToSheets(sheetsUrl, initiatives, activities);
+            if (initiatives && initiatives.length > 0) {
+                const { error: initError } = await supabase.from('initiatives').upsert(initiatives);
+                if (initError) throw initError;
+            }
+            if (activities && activities.length > 0) {
+                const { error: actError } = await supabase.from('activities').upsert(activities);
+                if (actError) throw actError;
+            }
         } catch (err) {
-            console.warn('Sheets import failed, saving locally:', err.message);
+            console.warn('Supabase import failed, saving locally:', err.message);
         }
     }
     setInitiatives(initiatives);

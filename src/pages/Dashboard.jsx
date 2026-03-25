@@ -7,7 +7,7 @@ import { Activity, Target, ArrowUpRight, TrendingUp } from 'lucide-react';
 import {
   computeMetrics, groupByDate, groupByField, conversionTrend,
   buildFunnelData, collectStages, getStageCount,
-  formatDateShort, formatDate, CHART_COLORS, statusColor, pct,
+  formatDateShort, formatDate, CHART_COLORS, pct,
 } from '../utils/helpers';
 
 const CustomTooltip = ({ active, payload, label }) => {
